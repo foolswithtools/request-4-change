@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "spec_dir": "docs/specs",
+  "known_issues_dir": "docs/known-issues",
+  "roadmap_path": "docs/ROADMAP.md",
+  "partitions": [],
+  "gate_commands": "deferred",
+  "labels": [
+    "program:prebutton",
+    "blocked: decision",
+    "feature",
+    "bug",
+    "infra",
+    "docs"
+  ]
+}
