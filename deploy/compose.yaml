@@ -1,0 +1,77 @@
+# request-4-change for a local trial: Postgres 16, the migrations, control and edge.
+# Not for production: the database password below is a local placeholder, and no worker runs.
+#
+#   head -c 32 /dev/urandom > kek    # control's key-encryption key, beside this file
+#   docker compose up
+#
+# control answers on http://127.0.0.1:8080 and edge on http://127.0.0.1:8090/__r4c/.
+# Edge needs a host app's JWKS over HTTPS: set R4C_HOST_JWKS_URL and R4C_APP_ID to yours.
+# Telemetry is off unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
+
+name: request-4-change
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_USER: r4c
+      POSTGRES_PASSWORD: local-trial-only
+      POSTGRES_DB: r4c
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U r4c']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Applies the image's migrations once, then exits.
+  migrate:
+    image: ghcr.io/foolswithtools/request-4-change-server@sha256:56e4d4327bb32003571d70cce66bdf89c5f35e2a0259da26776aee00f61a3cb4
+    command: ['--role=control', 'db', 'migrate']
+    environment:
+      DATABASE_URL: postgresql://r4c:local-trial-only@postgres:5432/r4c
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  control:
+    image: ghcr.io/foolswithtools/request-4-change-server@sha256:56e4d4327bb32003571d70cce66bdf89c5f35e2a0259da26776aee00f61a3cb4
+    command: ['--role=control']
+    environment:
+      DATABASE_URL: postgresql://r4c:local-trial-only@postgres:5432/r4c
+      R4C_KEK: file:/run/secrets/kek
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      R4C_DEPLOYMENT_ENVIRONMENT: local
+      R4C_INSTANCE: ${R4C_INSTANCE:-local-trial}
+    secrets:
+      - kek
+    ports:
+      - '127.0.0.1:8080:8080'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  edge:
+    image: ghcr.io/foolswithtools/request-4-change-server@sha256:56e4d4327bb32003571d70cce66bdf89c5f35e2a0259da26776aee00f61a3cb4
+    command: ['--role=edge']
+    environment:
+      R4C_APP_ID: ${R4C_APP_ID:-example-app}
+      R4C_HOST_JWKS_URL: ${R4C_HOST_JWKS_URL:-https://app.example.com/.well-known/jwks.json}
+      R4C_CONTROL_URL: http://control:8080
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      R4C_DEPLOYMENT_ENVIRONMENT: local
+      R4C_INSTANCE: ${R4C_INSTANCE:-local-trial}
+    ports:
+      - '127.0.0.1:8090:8080'
+    depends_on:
+      - control
+
+secrets:
+  kek:
+    file: ./kek
+
+volumes:
+  pgdata:
