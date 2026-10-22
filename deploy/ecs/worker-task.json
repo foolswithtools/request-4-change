@@ -1,0 +1,33 @@
+{
+  "family": "r4c-worker",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "1024",
+  "memory": "2048",
+  "runtimePlatform": { "operatingSystemFamily": "LINUX", "cpuArchitecture": "X86_64" },
+  "executionRoleArn": "arn:aws:iam::<account-id>:role/request-4-change-worker-exec",
+  "taskRoleArn": "arn:aws:iam::<account-id>:role/request-4-change-worker-task",
+  "containerDefinitions": [
+    {
+      "name": "worker",
+      "image": "ghcr.io/foolswithtools/request-4-change-worker@sha256:e7603b4a3ccb907b16f9d835483428120d24e7d46b24dc6273cca616d78e6903",
+      "essential": true,
+      "command": ["run"],
+      "environment": [
+        { "name": "ANTHROPIC_MODEL", "value": "<bedrock-inference-profile-id>" },
+        { "name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "https://otlp.example.com" },
+        { "name": "OTEL_SDK_DISABLED", "value": "false" },
+        { "name": "R4C_DEPLOYMENT_ENVIRONMENT", "value": "production" },
+        { "name": "R4C_INSTANCE", "value": "example" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/request-4-change-worker",
+          "awslogs-region": "<region>",
+          "awslogs-stream-prefix": "worker"
+        }
+      }
+    }
+  ]
+}

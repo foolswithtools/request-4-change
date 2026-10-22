@@ -1,0 +1,59 @@
+{
+  "family": "request-4-change-control",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "512",
+  "memory": "1024",
+  "runtimePlatform": { "operatingSystemFamily": "LINUX", "cpuArchitecture": "X86_64" },
+  "executionRoleArn": "arn:aws:iam::<account-id>:role/request-4-change-control-exec",
+  "taskRoleArn": "arn:aws:iam::<account-id>:role/request-4-change-control-task",
+  "containerDefinitions": [
+    {
+      "name": "control",
+      "image": "ghcr.io/foolswithtools/request-4-change-server@sha256:56e4d4327bb32003571d70cce66bdf89c5f35e2a0259da26776aee00f61a3cb4",
+      "essential": true,
+      "command": ["--role=control"],
+      "portMappings": [
+        { "containerPort": 8080, "protocol": "tcp", "name": "http" },
+        { "containerPort": 8081, "protocol": "tcp", "name": "internal" }
+      ],
+      "environment": [
+        { "name": "DATABASE_URL", "value": "postgresql://<db-host>:5432/<db-name>?sslmode=no-verify" },
+        { "name": "R4C_KEK", "value": "kms:arn:aws:kms:<region>:<account-id>:key/<key-id>" },
+        { "name": "R4C_ADMIN_OIDC_ISSUER", "value": "https://idp.example.com" },
+        { "name": "R4C_ADMIN_OIDC_CLIENT_ID", "value": "<client-id>" },
+        { "name": "R4C_ADMIN_OIDC_CLIENT_SECRET_LOCATOR", "value": "secretsmanager:arn:aws:secretsmanager:<region>:<account-id>:secret:<admin-client-secret>" },
+        { "name": "R4C_ADMIN_ROLE_CLAIM", "value": "groups" },
+        { "name": "R4C_ADMIN_ROLE", "value": "request-4-change-admins" },
+        { "name": "R4C_ADMIN_BASE_URL", "value": "https://r4c.example.com" },
+        { "name": "R4C_TRUSTED_PROXIES", "value": "10.0.0.0/24,10.0.1.0/24" },
+        { "name": "R4C_ECS_CLUSTER_ARN", "value": "arn:aws:ecs:<region>:<account-id>:cluster/<cluster-name>" },
+        { "name": "R4C_WORKER_SUBNET_IDS", "value": "subnet-<private-a>,subnet-<private-b>" },
+        { "name": "R4C_WORKER_SECURITY_GROUP_ID", "value": "sg-<worker>" },
+        { "name": "R4C_CONTROL_INTERNAL_URL", "value": "http://control.internal.example.com:8081" },
+        { "name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "https://otlp.example.com" },
+        { "name": "OTEL_SDK_DISABLED", "value": "false" },
+        { "name": "R4C_DEPLOYMENT_ENVIRONMENT", "value": "production" },
+        { "name": "R4C_INSTANCE", "value": "example" }
+      ],
+      "secrets": [
+        { "name": "R4C_DATABASE_CREDENTIALS", "valueFrom": "arn:aws:secretsmanager:<region>:<account-id>:secret:<database-credentials>" }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 20
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/request-4-change-control",
+          "awslogs-region": "<region>",
+          "awslogs-stream-prefix": "control"
+        }
+      }
+    }
+  ]
+}
