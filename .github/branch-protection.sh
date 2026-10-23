@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Applies branch protection to main of this repo (prebutton spec D-021):
+# Applies branch protection to main of this repo (program decision D-021):
 # one approving review from a CODEOWNER, admins included, no force pushes
 # or deletions, no required status checks (this repo has no CI, D-023).
 # A new push dismisses earlier approvals, and the last push must be

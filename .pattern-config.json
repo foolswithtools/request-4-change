@@ -6,7 +6,6 @@
   "partitions": [],
   "gate_commands": "deferred",
   "labels": [
-    "program:prebutton",
     "blocked: decision",
     "feature",
     "bug",
