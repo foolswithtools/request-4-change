@@ -27,7 +27,7 @@ services:
 
   # Applies the image's migrations once, then exits.
   migrate:
-    image: ghcr.io/foolswithtools/request-4-change-server@sha256:56e4d4327bb32003571d70cce66bdf89c5f35e2a0259da26776aee00f61a3cb4
+    image: ghcr.io/foolswithtools/request-4-change-server@sha256:7c07f83fd9e32ec13a4b5b02301230bd922da517a8d6a1a1bced5dc38633f50d
     command: ['--role=control', 'db', 'migrate']
     environment:
       DATABASE_URL: postgresql://r4c:local-trial-only@postgres:5432/r4c
@@ -36,7 +36,7 @@ services:
         condition: service_healthy
 
   control:
-    image: ghcr.io/foolswithtools/request-4-change-server@sha256:56e4d4327bb32003571d70cce66bdf89c5f35e2a0259da26776aee00f61a3cb4
+    image: ghcr.io/foolswithtools/request-4-change-server@sha256:7c07f83fd9e32ec13a4b5b02301230bd922da517a8d6a1a1bced5dc38633f50d
     command: ['--role=control']
     environment:
       DATABASE_URL: postgresql://r4c:local-trial-only@postgres:5432/r4c
@@ -54,7 +54,7 @@ services:
         condition: service_completed_successfully
 
   edge:
-    image: ghcr.io/foolswithtools/request-4-change-server@sha256:56e4d4327bb32003571d70cce66bdf89c5f35e2a0259da26776aee00f61a3cb4
+    image: ghcr.io/foolswithtools/request-4-change-server@sha256:7c07f83fd9e32ec13a4b5b02301230bd922da517a8d6a1a1bced5dc38633f50d
     command: ['--role=edge']
     environment:
       R4C_APP_ID: ${R4C_APP_ID:-example-app}

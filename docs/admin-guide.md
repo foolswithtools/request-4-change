@@ -13,18 +13,19 @@
 | `R4C_ADMIN_OIDC_CLIENT_SECRET_LOCATOR` | no | Where the client secret lives: `ssm:<name>` or `secretsmanager:<arn>`, never the secret itself. Leave it unset for a public client (PKCE only). |
 | `R4C_ADMIN_ROLE_CLAIM` | no | The ID token claim that lists the user's groups. Default `groups`. |
 | `R4C_ADMIN_ROLE` | yes | The group a user must hold to use the page. |
+| `R4C_ADMIN_SESSION_TTL_MINUTES` | no | How long a session lasts from sign-in, in whole minutes from 5 to 480. Default 60. Also the longest a user removed from the role keeps access. |
 | `R4C_ADMIN_BASE_URL` | yes | The page's origin as browsers see it, for example `https://r4c.example.com`, with no path. The redirect URI is `<base>/admin/callback`, and every `PUT` and `POST` must carry this exact `Origin`. |
 | `DATABASE_URL` | yes | Sessions, sign-ins in flight and the audit log live in Postgres. |
 | `R4C_DATABASE_CREDENTIALS` | no | JSON `{"username": "...", "password": "..."}`, such as an RDS managed master secret injected whole. `control` puts them, URL-encoded, into `DATABASE_URL`, which must then carry no user or password. |
 | `R4C_KEK` | yes | The key-encryption key for `local` values ([below](#settings-and-secrets)). |
 
-Register `<R4C_ADMIN_BASE_URL>/admin/callback` as the client's callback URL, with the authorization code grant and the `openid` and `email` scopes. With **Amazon Cognito**, the issuer is `https://cognito-idp.<region>.amazonaws.com/<user-pool-id>` with no trailing slash, and groups are in the claim `cognito:groups`, so set `R4C_ADMIN_ROLE_CLAIM=cognito:groups`. A client with a secret sends it with HTTP Basic authentication at the token endpoint.
+Register `<R4C_ADMIN_BASE_URL>/admin/callback` as the client's callback URL, with the authorization code grant and the `openid` and `email` scopes. With **Amazon Cognito**, the issuer is `https://cognito-idp.<region>.amazonaws.com/<user-pool-id>` with no trailing slash, and groups are in the claim `cognito:groups`, so set `R4C_ADMIN_ROLE_CLAIM=cognito:groups`. A client with a secret sends it with HTTP Basic authentication at the token endpoint. After a secret rotation, the first token request that the IdP refuses with `invalid_client` makes `control` read the secret again, so that sign-in fails and the next one succeeds, with no restart.
 
 ## Signing in
 
-`GET /admin` without a session goes to the IdP with a fresh state, nonce and PKCE challenge, bound to the browser by a short-lived cookie. The callback checks all three, then creates a session: cookie `r4c_admin` (`HttpOnly; Secure; SameSite=Strict`), valid 8 hours from sign-in and never extended. The database stores only a hash of the cookie. The user's groups are checked against `R4C_ADMIN_ROLE` on every request, so a user without the role gets a session that every page refuses with 403. "Sign out" deletes the session.
+`GET /admin` without a session goes to the IdP with a fresh state, nonce and PKCE challenge, bound to the browser by a short-lived cookie. The callback checks all three, then creates a session: cookie `__Host-r4c_admin` (`Path=/; HttpOnly; Secure; SameSite=Strict`; plain `r4c_admin` on a plain-`http` localhost, where browsers refuse the `__Host-` prefix), valid `R4C_ADMIN_SESSION_TTL_MINUTES` from sign-in and never extended. The database stores only a hash of the cookie. The user's groups are read at sign-in and checked against `R4C_ADMIN_ROLE` on every request, so a user without the role gets a session that every page refuses with 403, and a user removed from the role keeps access until the session ends. "Sign out" clears the cookie and deletes the session, even one that has expired.
 
-When the IdP is on another site, the browser withholds the `SameSite=Strict` cookie on the redirect back, so `/admin` answers that one request with a page that reloads itself from its own site. Browsers that do not send `Sec-Fetch-Site` (Safari before 16.4) may loop at sign-in in that setup.
+When the IdP is on another site, the browser withholds the `SameSite=Strict` cookie on a redirect back from it, so the callback answers with a page that reloads `/admin` from the app's own site. This works in browsers that do not send `Sec-Fetch-Site`, such as Safari before 16.4.
 
 ## What the page shows
 
@@ -43,7 +44,7 @@ Keys set on this page apply at once in the `control` process that serves it, and
 | `llm.provider` | `bedrock` |
 | `llm.model` | The model id. On Bedrock, use the inference profile id, for example `us.anthropic.<model>`. |
 | `llm.region` | AWS region of the Bedrock endpoint |
-| `llm.unit_token_cap` | Token cap for one unit's worker session |
+| `llm.unit_token_cap` | Most tokens decomposition may estimate for one unit; a larger unit is split. Also the most tokens one worker session may use: the worker stops a session once a model step passes this or the request's remaining ceiling |
 
 Until all four and `R4C_KEK` are set, `control` logs `LLM steps skipped` once and claims nothing, so queued requests wait. A daily token budget (200,000 by default) and a kill switch are kept in Postgres and read before every model call; while the switch is on or the budget is spent, the steps pause and nothing fails. Set the worker task definition's `ANTHROPIC_MODEL` to the same inference profile id.
 
@@ -68,12 +69,19 @@ The App needs `issues: write` on the system-of-record repository and `members: r
 |---|---|---|
 | `dispatch.targets` | key | JSON keyed by `owner/repo`, for example `{"acme/app": {"defaultBranch": "main", "checkCommands": ["pnpm test:unit"]}}`. A repository that isn't listed gets no token. |
 | `dispatch.repo` | key | The installation's target repository, `owner/repo`, with an entry in `dispatch.targets` |
-| `dispatch.stuck_after_minutes` | key | How long a unit may stay dispatched with no report and no PR before it counts as stuck, 15 to 10080. Default 60. Keep it above the worker's longest run on your target: a worker allows up to 20 minutes for the model step and 15 for each check command, plus clone and push. |
+| `dispatch.stuck_after_minutes` | key | How long a unit may stay dispatched with no report and no PR before it counts as stuck, 15 to 10080. Default 60. A worker's whole run must end 5 minutes before it: past that, the worker stops and reports failed without pushing. Keep it above the target's usual run plus 5 minutes: a worker allows up to 20 minutes for the model step and 15 for each check command, plus clone and push. |
 | `dispatch.stuck_retries` | key | Fresh attempts for a stuck unit before it is escalated, 0 to 10. Default 3. |
 | `R4C_ECS_CLUSTER_ARN`, `R4C_WORKER_SUBNET_IDS`, `R4C_WORKER_SECURITY_GROUP_ID`, `R4C_CONTROL_INTERNAL_URL` | environment | What `RunTask` uses. Until all four are set, `control` logs `dispatch skipped` once and starts no task. |
 | `R4C_DISPATCH_CONCURRENCY` | environment | Units being dispatched at once, 1 to 100. Default 2. |
 
-Before each unit, `control` checks that the target is configured, that its default branch requires status checks, and that the request is below its token ceiling. A unit that fails a check stays approved, gets one comment on its issue naming the reason, and is checked again after 15 minutes. When GitHub cannot be reached for the branch-protection check, the unit is checked again after 15 minutes without a comment, and the audit log records the reason `unavailable`.
+Before each unit, `control` checks that the target is configured, that its default branch requires status checks, and that the request is below its token ceiling. A unit that fails a check stays where it is (approved, or dispatched for a later round), gets one comment on its issue naming the reason (one per round), and is checked again after 15 minutes. When GitHub cannot be reached for the branch-protection check, the unit is checked again after 15 minutes without a comment, and the audit log records the reason `unavailable`.
+
+### Egress proxy
+
+| Key | Kind | Meaning |
+|---|---|---|
+| `worker.egress_proxy_key` | secret | The bearer the egress proxy presents for its list: the same secret its task definition injects as `R4C_PROXY_KEY`. Unset or empty, the list route answers 503 and the proxy refuses every connection. |
+| `worker.egress_allowlist` | config | Optional. A JSON array of host names and `*.host` wildcards worker tasks may reach through the proxy, for example `["api.github.com", "github.com", "codeload.github.com", "bedrock-runtime.<region>.amazonaws.com"]`. A wildcard matches subdomains only, and its host needs at least two labels and must not be a shared suffix such as `amazonaws.com`. IP literals and ports are refused. Unset, it is GitHub and the Bedrock runtime in `control`'s region. Add a package registry only if your checks install packages. The proxy reads it every five minutes. |
 
 ### Feedback and escalation
 
@@ -81,6 +89,7 @@ Before each unit, `control` checks that the target is configured, that its defau
 |---|---|
 | `feedback.escalation_team` | The team escalation comments mention, `org/team-slug`. Unset: no one is mentioned. A person is never mentioned. |
 | `feedback.answers_timeout_hours` | How long a unit waits for an `r4c-answers:` reply to its questions before it is escalated, 1 to 8760. Default 72. |
+| `feedback.open_pr_minutes` | How long a unit with an open PR may go without control re-reading that PR from GitHub, in case a webhook was lost, 5 to 10080. Default 30. |
 | `runner.idle_interval_ms` | How long a queue step waits after finding nothing to do, 10 to 3600000. Default 5000. |
 
 A failed CI run on a worker's PR starts a new round with the redacted failure log, at most three rounds. After the last, `control` asks the model once to rescope the unit into at most two smaller ones; a unit that can't be rescoped, or whose PR is closed without a merge, is escalated: labelled `r4c:needs-human`, left open, with one comment. `R4C_RUNNER=off` starts no queue steps (a `control` that only serves the API).
@@ -97,7 +106,7 @@ Each key's value has one locator:
 
 A rotated value in Secrets Manager or SSM takes effect within one cache TTL, without a redeploy. A store read that fails is retried after 30 s.
 
-`R4C_KEK` picks the key-encryption key: `kms:<key-id-or-arn>`, or `file:<path>` to a mounted file of exactly 32 random bytes (`head -c 32 /dev/urandom > kek && chmod 600 kek`, mounted from a secret store, never the image). Each `local` value gets its own data key, wrapped by the KEK, and both layers bind the key name, so a sealed value copied onto another key does not open.
+`R4C_KEK` picks the key-encryption key: `kms:<key-id-or-arn>`, or `file:<path>` to a mounted file of exactly 32 random bytes (`head -c 32 /dev/urandom > kek`, mounted from a secret store, never the image). The file must be readable by uid 1000, the image's `node` user: on Linux, `chown 1000 kek && chmod 600 kek`, or `chmod 644 kek` on a host no one else uses. Each `local` value gets its own data key, wrapped by the KEK, and both layers bind the key name, so a sealed value copied onto another key does not open.
 
 Keep `R4C_KEK` spelled exactly as when values were sealed: its key id is a hash of the configured string, so switching between a key id, its ARN or an alias strands existing values. For KMS, turn on automatic key rotation; nothing else changes. To rotate a `file:` key, or move from `file:` to `kms:`:
 

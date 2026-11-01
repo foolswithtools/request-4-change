@@ -15,7 +15,7 @@ These are not secrets; they go in the task definitions and in `compose.yaml` as 
 
 No other variable sets the endpoint; the per-signal variables, such as `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, are ignored. Telemetry never stops a role from starting.
 
-**Worker endpoint.** Worker tasks may only connect out on TCP 443 (and to `control`). A worker's endpoint must therefore be HTTPS on port 443, or a collector it reaches inside the VPC, for example one running beside `control`. An `http://…:4318` collector outside the VPC will not receive worker telemetry.
+**Worker endpoint.** Worker tasks reach the internet through the egress proxy, and the OTLP exporter does not go through the proxy: it reads no proxy variable. A worker's endpoint must therefore be a collector inside the VPC, for example one running beside `control`, with an egress rule from the workers' security group to its port. A collector outside the VPC will not receive worker telemetry, even if its name is on the allowlist.
 
 ## Service names
 
