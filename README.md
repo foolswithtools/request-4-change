@@ -13,8 +13,8 @@ This repository is the public face of the product. It holds **documentation and 
 
 request-4-change runs as two container images, published on GitHub Container Registry:
 
-- `ghcr.io/foolswithtools/request-4-change-server@sha256:56e4d4327bb32003571d70cce66bdf89c5f35e2a0259da26776aee00f61a3cb4`, run as the `edge` role (a sidecar in the host app's task) and as the `control` role (one service per installation);
-- `ghcr.io/foolswithtools/request-4-change-worker@sha256:e7603b4a3ccb907b16f9d835483428120d24e7d46b24dc6273cca616d78e6903`, run as one short-lived task per unit of work.
+- `ghcr.io/foolswithtools/request-4-change-server@sha256:7c07f83fd9e32ec13a4b5b02301230bd922da517a8d6a1a1bced5dc38633f50d`, run as the `edge` role (a sidecar in the host app's task) and as the `control` role (one service per installation);
+- `ghcr.io/foolswithtools/request-4-change-worker@sha256:dd9c2aa3dd4f91371ba2c164f0757029825534d1a792a2fb0a6b9e635be70d67`, run as one short-lived task per unit of work.
 
 Every image reference in this repository is pinned by digest (`image@sha256:...`), never by a mutable tag. The images carry a bundled build, and their contents can be inspected; the security model does not depend on the code being secret.
 

@@ -9,6 +9,7 @@ This page runs request-4-change on Amazon ECS on Fargate, in the shape request-4
 | `control` | One ECS service of `deploy/ecs/control-service.json`, behind the load balancer at its own hostname, for example `r4c.example.com` | Browsers (the admin page), `edge`, GitHub webhooks on port 8080; workers on its internal port 8081, inside the VPC only |
 | `edge` | A sidecar container inside the host app's task, from `deploy/ecs/edge-sidecar.json` | The load balancer, for `/__r4c/*` on the host app's hostname |
 | worker | One task of `deploy/ecs/worker-task.json` per unit, started by `control` with `RunTask` | Nobody: it has no inbound rules and only connects out |
+| egress proxy | One ECS service of `deploy/ecs/egress-proxy-task.json`, the worker image with its proxy entrypoint, with no load balancer | Workers, on TCP 3128, inside the VPC only |
 | Postgres 16 | For example Amazon RDS, in private subnets | `control` only |
 
 `edge` runs **inside the host app's task**, not in front of it. The host app keeps its own target group and listener rule; a second target group for the sidecar's port and a listener rule that matches the host app's hostname **and** the path `/__r4c/*`, at a higher priority than the host-only rule, send the widget's traffic to `edge`. The host app must not serve anything under that prefix. Its health check is `/__r4c/healthz`, since `edge` answers 404 at `/healthz`.
@@ -16,8 +17,9 @@ This page runs request-4-change on Amazon ECS on Fargate, in the shape request-4
 ## 1. Network
 
 - **Load balancer.** An internet-facing ALB with HTTPS listeners for the host app's hostname and `control`'s.
-- **control's security group.** Ingress on 8080 from the load balancer, and on 8081 from the workers' security group only. Give `control` a private DNS name the workers can resolve, for example with an ECS Service Connect or Cloud Map namespace, and use it in `R4C_CONTROL_INTERNAL_URL` (`http://control.internal.example.com:8081` in the example).
-- **The workers' security group.** No ingress rules. Egress on TCP 443 (through a NAT gateway, to GitHub and Bedrock) and on TCP 8081 to `control`'s security group. Nothing else. Rule 443 does not restrict destinations by domain; see [Security model](security-model.md#worker-egress).
+- **control's security group.** Ingress on 8080 from the load balancer, and on 8081 from the workers' and the egress proxy's security groups only. Give `control` a private DNS name the workers can resolve, for example with an ECS Service Connect or Cloud Map namespace, and use it in `R4C_CONTROL_INTERNAL_URL` (`http://control.internal.example.com:8081` in the example).
+- **The workers' security group.** No ingress rules. Egress on TCP 3128 to the egress proxy's security group and on TCP 8081 to `control`'s security group. Fargate (platform 1.4.0) pulls the image and sends `awslogs` through the task's own network interface and this group, so the group must also reach your registry and CloudWatch Logs. With VPC endpoints for them (and the image in ECR, since GHCR has none), allow 443 to those endpoints only, and workers reach the internet only through the proxy. An S3 gateway endpoint for ECR's layers must have a policy that limits it to ECR's layer bucket, or S3 itself becomes a way out. Without endpoints you need TCP 443 to `0.0.0.0/0`, and then a process that ignores the proxy settings can reach any HTTPS host. If workers export telemetry, add a rule to your collector inside the VPC ([Observability](observability.md)). See [Security model](security-model.md#worker-egress).
+- **The egress proxy's security group.** Ingress on TCP 3128 from the workers' security group only, never from the load balancer. Egress on TCP 443 (through a NAT gateway, to the allowlisted names) and on TCP 8081 to `control`'s security group, where it reads its list. Give the proxy a private DNS name the workers can resolve, as for `control`, and use it in the worker's `R4C_EGRESS_PROXY_URL` (`http://egress-proxy.internal.example.com:3128` in the example). One task is a single point of failure: while it is down, units fail.
 - **Private subnets** for `control`, the workers and the database. `R4C_WORKER_SUBNET_IDS` lists the workers' subnets.
 
 ## 2. Database and key
@@ -27,7 +29,7 @@ This page runs request-4-change on Amazon ECS on Fargate, in the shape request-4
 
 ## 3. IAM roles
 
-Four roles, each trusted by `ecs-tasks.amazonaws.com` only. The published images are public on GHCR, so pulling them needs no registry credentials.
+Five roles, each trusted by `ecs-tasks.amazonaws.com` only. The published images are public on GHCR, so pulling them needs no registry credentials.
 
 | Role | Allows |
 |---|---|
@@ -35,6 +37,7 @@ Four roles, each trusted by `ecs-tasks.amazonaws.com` only. The published images
 | control execution role | Log writes, and `secretsmanager:GetSecretValue` on the database credentials secret it injects |
 | worker task role | `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on the configured inference profile and its models, and nothing else. Claude Code streams each turn, so the streaming action is required. |
 | worker execution role | Log writes only, plus pulls from your registry if you run an [extended image](deploy-elsewhere.md#extending-the-images) there. A worker task gets no injected secrets. |
+| egress proxy execution role | Log writes, and `secretsmanager:GetSecretValue` on the proxy key secret it injects as `R4C_PROXY_KEY`. The proxy has no task role, so it holds no AWS credentials. |
 
 ## 4. Register the task definitions
 
@@ -43,7 +46,10 @@ Replace every `<placeholder>` and `example.com` value, then:
 ```sh
 aws ecs register-task-definition --cli-input-json file://deploy/ecs/control-service.json
 aws ecs register-task-definition --cli-input-json file://deploy/ecs/worker-task.json
+aws ecs register-task-definition --cli-input-json file://deploy/ecs/egress-proxy-task.json
 ```
+
+Create the egress proxy's service from `r4c-egress`: one task, in the private subnets, with the proxy's security group, no public IP, no load balancer, registered under the private DNS name in the worker's `R4C_EGRESS_PROXY_URL`. Put a random value, for example from `openssl rand -hex 32`, into the secret its `R4C_PROXY_KEY` names, and point `control`'s `worker.egress_proxy_key` at the same secret ([admin guide](admin-guide.md#egress-proxy)). Until both match, the proxy refuses every connection.
 
 Add the container in `deploy/ecs/edge-sidecar.json` to the `containerDefinitions` of your host app's task definition, and register that. The sidecar listens on 8090 because host app containers often use 8080; tasks share one network namespace, so the ports must differ.
 

@@ -1,7 +1,7 @@
 [
   {
     "name": "edge",
-    "image": "ghcr.io/foolswithtools/request-4-change-server@sha256:56e4d4327bb32003571d70cce66bdf89c5f35e2a0259da26776aee00f61a3cb4",
+    "image": "ghcr.io/foolswithtools/request-4-change-server@sha256:7c07f83fd9e32ec13a4b5b02301230bd922da517a8d6a1a1bced5dc38633f50d",
     "essential": true,
     "command": ["--role=edge"],
     "portMappings": [{ "containerPort": 8090, "protocol": "tcp", "name": "r4c-edge" }],
